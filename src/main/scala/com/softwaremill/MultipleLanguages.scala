@@ -2,10 +2,10 @@ package com.softwaremill
 
 import java.util.UUID
 
-import cats.data.Coproduct
-import cats.free.{Free, Inject}
+import cats.data.{EitherK => Coproduct}
+import cats.free.Free
 import cats.implicits._
-import cats.{Monad, ~>}
+import cats.{InjectK => Inject, Monad, ~>}
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future

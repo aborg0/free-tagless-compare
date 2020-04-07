@@ -4,10 +4,15 @@ name := "free-tagless-compare"
 
 version := "0.1-SNAPSHOT"
 
-scalaVersion := "2.12.2"
+scalaVersion := "2.13.1"
+
+val catsVersion = "2.1.1"
 
 libraryDependencies ++= Seq(
-  "org.typelevel" %% "cats" % "0.9.0"
+  "org.typelevel" %% "cats-kernel" % catsVersion,
+  "org.typelevel" %% "cats-core" % catsVersion,
+  "org.typelevel" %% "cats-free" % catsVersion,
+  "org.typelevel" %% "cats-tagless-core" % "0.11",
 )
 
-addCompilerPlugin("org.spire-math" %% "kind-projector" % "0.9.3")
+addCompilerPlugin("org.typelevel" %% "kind-projector" % "0.11.0" cross CrossVersion.full)
