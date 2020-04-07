@@ -89,4 +89,55 @@ object Refactoring {
       new LoyaltyPoints(new FutureInterpreter {}).addPoints(UUID.randomUUID(), 10)
 
   }
+
+  object UsingZio extends zio.App {
+    import zio._
+    trait UserRepository {
+      def userRepository: UserRepository.Service
+    }
+
+    object UserRepository {
+      trait Service {
+        def findUser(id: UUID): Task[Option[User]]
+        def updateUser(u: User): Task[Unit]
+      }
+      trait InMemory extends UserRepository.Service {
+        private lazy val users = collection.mutable.Map[UUID, User]()
+        override def findUser(id: UUID): UIO[Option[User]] =
+          UIO.effectTotal(users.get(id))
+        override def updateUser(u: User): UIO[Unit] =
+          UIO.effectTotal(users.put(u.id, u))
+      }
+    }
+
+    object userRepository {
+      def findUser(id: UUID): ZIO[UserRepository, Throwable, Option[User]] = ZIO.accessM(_.userRepository.findUser(id))
+      def updateUser(user: User): ZIO[UserRepository, Throwable, Unit] = ZIO.accessM(_.userRepository.updateUser(user))
+    }
+
+
+    object LoyaltyPoints {
+      def addPoints(userId: UUID, pointsToAdd: Int): ZIO[UserRepository, Throwable, Either[String, Unit]] = {
+        userRepository.findUser(userId).flatMap {
+          case None => Task(Left("User not found"))
+          case Some(user) =>
+            val updated = user.copy(loyaltyPoints = user.loyaltyPoints + pointsToAdd)
+            userRepository.updateUser(updated).map(_ => Right(()))
+        }
+      }
+    }
+
+    override def run(args: List[String]): URIO[Any, Int] = {
+//      val newUser = userRepository.updateUser(User(UUID.randomUUID(), "hello@earth.world", 0))
+      val newUser = User(UUID.randomUUID(), "hello@earth.world", 0)
+      val appLogic = for {
+        update <- userRepository.updateUser(newUser)
+        _ <- LoyaltyPoints.addPoints(newUser.id, 3)
+      } yield ()
+      val program = appLogic.provide(new UserRepository {
+        override def userRepository: UserRepository.Service = new UserRepository.InMemory {}
+      })
+      program.fold(_ => 1, _ => 0)
+    }
+  }
 }
