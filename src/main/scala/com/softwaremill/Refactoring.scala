@@ -110,7 +110,7 @@ object Refactoring {
       }
     }
 
-    object userRepository {
+    object ur {
       def findUser(id: UUID): ZIO[UserRepository, Throwable, Option[User]] = ZIO.accessM(_.userRepository.findUser(id))
       def updateUser(user: User): ZIO[UserRepository, Throwable, Unit] = ZIO.accessM(_.userRepository.updateUser(user))
     }
@@ -118,20 +118,19 @@ object Refactoring {
 
     object LoyaltyPoints {
       def addPoints(userId: UUID, pointsToAdd: Int): ZIO[UserRepository, Throwable, Either[String, Unit]] = {
-        userRepository.findUser(userId).flatMap {
+        ur.findUser(userId).flatMap {
           case None => Task(Left("User not found"))
           case Some(user) =>
             val updated = user.copy(loyaltyPoints = user.loyaltyPoints + pointsToAdd)
-            userRepository.updateUser(updated).map(_ => Right(()))
+            ur.updateUser(updated).map(_ => Right(()))
         }
       }
     }
 
     override def run(args: List[String]): URIO[Any, Int] = {
-//      val newUser = userRepository.updateUser(User(UUID.randomUUID(), "hello@earth.world", 0))
       val newUser = User(UUID.randomUUID(), "hello@earth.world", 0)
       val appLogic = for {
-        update <- userRepository.updateUser(newUser)
+        update <- ur.updateUser(newUser)
         _ <- LoyaltyPoints.addPoints(newUser.id, 3)
       } yield ()
       val program = appLogic.provide(new UserRepository {

@@ -10,9 +10,11 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 
 object Compile {
+
   case class User(id: UUID, email: String, loyaltyPoints: Int) {
     def serialize: String = id.toString + "," + loyaltyPoints + "," + email
   }
+
   object User {
     def parse(s: String): User = {
       val parts = s.split(",")
@@ -22,13 +24,16 @@ object Compile {
 
 
   object Initial {
+
     trait KVStore {
       def get(k: String): Future[Option[String]]
+
       def put(k: String, v: String): Future[Unit]
     }
 
     trait UserRepository {
       def findUser(id: UUID): Future[Option[User]]
+
       def updateUser(u: User): Future[Unit]
     }
 
@@ -55,16 +60,21 @@ object Compile {
         }
       }
     }
+
   }
 
   object UsingFree {
+
     sealed trait UserRepositoryAlg[T]
+
     case class FindUser(id: UUID) extends UserRepositoryAlg[Option[User]]
+
     case class UpdateUser(u: User) extends UserRepositoryAlg[Unit]
 
     type UserRepository[T] = Free[UserRepositoryAlg, T]
 
     def findUser(id: UUID): UserRepository[Option[User]] = Free.liftF(FindUser(id))
+
     def updateUser(u: User): UserRepository[Unit] = Free.liftF(UpdateUser(u))
 
     def addPoints(userId: UUID, pointsToAdd: Int): UserRepository[Either[String, Unit]] = {
@@ -79,12 +89,15 @@ object Compile {
     //
 
     sealed trait KVAlg[T]
+
     case class Get(k: String) extends KVAlg[Option[String]]
+
     case class Put(k: String, v: String) extends KVAlg[Unit]
 
     type KV[T] = Free[KVAlg, T]
 
     def get(k: String): KV[Option[String]] = Free.liftF(Get(k))
+
     def put(k: String, v: String): KV[Unit] = Free.liftF(Put(k, v))
 
     //
@@ -98,7 +111,7 @@ object Compile {
           for {
             _ <- put(u.id.toString, serialized)
             _ <- put(u.email, serialized) // we also maintain a by-email index
-          } yield()
+          } yield ()
       }
     }
 
@@ -116,12 +129,14 @@ object Compile {
   }
 
   object UsingTagless {
+
     trait UserRepositoryAlg[F[_]] {
       def findUser(id: UUID): F[Option[User]]
+
       def updateUser(u: User): F[Unit]
     }
 
-    class LoyaltyPoints[F[_]: Monad](ur: UserRepositoryAlg[F]) {
+    class LoyaltyPoints[F[_] : Monad](ur: UserRepositoryAlg[F]) {
       def addPoints(userId: UUID, pointsToAdd: Int): F[Either[String, Unit]] = {
         ur.findUser(userId).flatMap {
           case None => implicitly[Monad[F]].pure(Left("User not found"))
@@ -136,6 +151,7 @@ object Compile {
 
     trait KVAlg[F[_]] {
       def get(k: String): F[Option[String]]
+
       def put(k: String, v: String): F[Unit]
     }
 
@@ -149,7 +165,7 @@ object Compile {
 
     //
 
-    class UserThroughKvInterpreter[F[_]: Monad](kv: KVAlg[F]) extends UserRepositoryAlg[F] {
+    class UserThroughKvInterpreter[F[_] : Monad](kv: KVAlg[F]) extends UserRepositoryAlg[F] {
       override def findUser(id: UUID): F[Option[User]] =
         kv.get(id.toString).map(_.map(User.parse))
 
@@ -167,4 +183,129 @@ object Compile {
         .addPoints(UUID.randomUUID(), 10)
 
   }
+
+  object UsingZio extends zio.App {
+
+    import zio._
+
+    type KV = Has[KV.Service]
+
+    object KV {
+
+      trait Service {
+        def get(k: String): Task[Option[String]]
+
+        def put(k: String, v: String): Task[Unit]
+      }
+
+      trait InMemory extends Service {
+        private lazy val kv = collection.mutable.Map[String, String]()
+
+        override def get(k: String): UIO[Option[String]] = UIO.effectTotal(kv.get(k))
+
+        override def put(k: String, v: String): UIO[Unit] = UIO.effectTotal(kv.put(k, v))
+      }
+
+    }
+
+    object keyValue {
+      def get(k: String) /*: ZIO[KV, Throwable, Option[String]]*/ = ZIO.accessM[KV](_.get.get(k))
+
+      def put(k: String, v: String) /*: ZIO[KV, Throwable, Unit]*/ = ZIO.accessM[KV](_.get.put(k, v))
+    }
+
+    type UserRepository = Has[UserRepository.Service]
+
+    object UserRepository {
+
+      trait Service {
+        def findUser(id: UUID): Task[Option[User]]
+
+        def updateUser(u: User): Task[Unit]
+      }
+
+      lazy val kvUserRepository: ZLayer[KV, Nothing, UserRepository] =
+        ZLayer.fromService /*[KV.Service, UserRepository.Service]*/ (kv => new Service {
+          override def findUser(id: UUID): Task[Option[User]] = kv.get(id.toString).map(_.map(User.parse))
+
+          override def updateUser(u: User): Task[Unit] = {
+            val serialized = u.serialize
+            //            //Only if kv allows multi-threaded updates
+            //            kv.put(u.id.toString, serialized).zipWithPar(kv.put(u.email, serialized))((_, _) => ())
+            for {_ <- kv.put(u.id.toString, serialized)
+                 _ <- kv.put(u.email, serialized)} yield ()
+          }
+        })
+      //        ZLayer.fromFunction { kv =>
+      //          new Service {
+      //            override def findUser(id: UUID): Task[Option[User]] =
+      //              kv.get.get(id.toString).map(_.map(User.parse))
+      //
+      //            override def updateUser(u: User): Task[Unit] = {
+      //              val serialized = u.serialize
+      ////Only if kv allows multi-threaded updates
+      ////              kv.get.put(u.id.toString, serialized).zipWithPar(kv.get.put(u.email, serialized))((_, _) => ())
+      //              for {
+      //                _ <- kv.get.put(u.id.toString, serialized)
+      //                _ <- kv.get.put(u.email, serialized)
+      //              } yield ()
+      //            }
+      //          }
+      //        }
+    }
+
+    object ur {
+      def findUser(id: UUID): ZIO[UserRepository, Throwable, Option[User]] = ZIO.accessM(_.get.findUser(id))
+
+      def updateUser(user: User): ZIO[UserRepository, Throwable, Unit] = ZIO.accessM(_.get.updateUser(user))
+    }
+
+    type Email = Has[Email.Service]
+
+    object Email {
+
+      trait Service {
+        def sendEmail(email: String, subject: String, body: String): Task[Unit]
+      }
+
+    }
+
+    object emailService {
+      def sendEmail(email: String, subject: String, body: String): ZIO[Email, Throwable, Unit] =
+        ZIO.accessM(_.get.sendEmail(email, subject, body))
+    }
+
+
+    object LoyaltyPoints {
+      def addPoints(userId: UUID, pointsToAdd: Int): ZIO[UserRepository with Email, Throwable, Either[String, Unit]] = {
+        ur.findUser(userId).flatMap {
+          case None => Task(Left("User not found"))
+          case Some(user) =>
+            val updated = user.copy(loyaltyPoints = user.loyaltyPoints + pointsToAdd)
+            for {
+              _ <- ur.updateUser(updated)
+              _ <- emailService.sendEmail(user.email, "Points added!", s"You now have ${updated.loyaltyPoints}")
+            } yield Right(())
+        }
+      }
+    }
+
+    override def run(args: List[String]): URIO[Any, Int] = {
+      val newUser = User(UUID.randomUUID(), "hello@earth.world", 0)
+      val appLogic: ZIO[UserRepository with Email, Throwable, Unit] = for {
+        update <- ur.updateUser(newUser)
+        _ <- LoyaltyPoints.addPoints(newUser.id, 3)
+      } yield ()
+      val kvLayer: Layer[Nothing, Has[KV.Service]] = ZLayer.succeed(new KV.InMemory {}: KV.Service)
+      val userRepositoryLayer: Layer[Nothing, UserRepository] = kvLayer >>> UserRepository.kvUserRepository
+      val emailLayer: Layer[Nothing, Email] = ZLayer.succeed(new Email.Service {
+        override def sendEmail(email: String, subject: String, body: String): Task[Unit] = Task(())
+      })
+      //      val combinedLayer: Layer[Nothing, Email with UserRepository] = emailLayer ++ userRepositoryLayer
+      //      val program = appLogic.provideLayer(combinedLayer)
+      val program = appLogic.provideSomeLayer[UserRepository](emailLayer).provideLayer(userRepositoryLayer)
+      program.fold(_ => 1, _ => 0)
+    }
+  }
+
 }
