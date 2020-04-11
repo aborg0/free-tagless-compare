@@ -4,7 +4,7 @@ import java.util.UUID
 
 import cats.free.Free
 import cats.implicits._
-import cats.{Monad, ~>}
+import cats.{Applicative, Monad, ~>}
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
@@ -102,7 +102,7 @@ object Compile {
 
     //
 
-    val userToKvInterpreter = new (UserRepositoryAlg ~> KV) {
+    val userToKvInterpreterMonadic = new (UserRepositoryAlg ~> KV) {
       override def apply[A](fa: UserRepositoryAlg[A]): KV[A] = fa match {
         case FindUser(id) =>
           get(id.toString).map(_.map(User.parse))
@@ -112,6 +112,15 @@ object Compile {
             _ <- put(u.id.toString, serialized)
             _ <- put(u.email, serialized) // we also maintain a by-email index
           } yield ()
+      }
+    }
+    val userToKvInterpreter = new (UserRepositoryAlg ~> KV) {
+      override def apply[A](fa: UserRepositoryAlg[A]): KV[A] = fa match {
+        case FindUser(id) =>
+          get(id.toString).map(_.map(User.parse))
+        case UpdateUser(u) =>
+          val serialized = u.serialize
+          put(u.id.toString, serialized).map2(put(u.email, serialized)/*we also maintain a by-email index*/)((_, _) => ())
       }
     }
 
@@ -165,7 +174,7 @@ object Compile {
 
     //
 
-    class UserThroughKvInterpreter[F[_] : Monad](kv: KVAlg[F]) extends UserRepositoryAlg[F] {
+    class UserThroughKvInterpreterMonadic[F[_] : Monad](kv: KVAlg[F]) extends UserRepositoryAlg[F] {
       override def findUser(id: UUID): F[Option[User]] =
         kv.get(id.toString).map(_.map(User.parse))
 
@@ -175,6 +184,18 @@ object Compile {
           _ <- kv.put(u.id.toString, serialized)
           _ <- kv.put(u.email, serialized) // we also maintain a by-email index
         } yield ()
+      }
+    }
+
+    class UserThroughKvInterpreter[F[_] : Applicative](kv: KVAlg[F]) extends UserRepositoryAlg[F] {
+      override def findUser(id: UUID): F[Option[User]] =
+        kv.get(id.toString).map(_.map(User.parse))
+
+      override def updateUser(u: User): F[Unit] = {
+        val serialized = u.serialize
+        Applicative[F].map2(kv.put(u.id.toString, serialized),
+          // we also maintain a by-email index
+          kv.put(u.email, serialized))((_, _) => ())
       }
     }
 
