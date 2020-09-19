@@ -311,7 +311,7 @@ object Compile {
       }
     }
 
-    override def run(args: List[String]): URIO[Any, Int] = {
+    override def run(args: List[String]): URIO[Any, ExitCode] = {
       val newUser = User(UUID.randomUUID(), "hello@earth.world", 0)
       val appLogic: ZIO[UserRepository with Email, Throwable, Unit] = for {
         update <- ur.updateUser(newUser)
@@ -325,7 +325,7 @@ object Compile {
       //      val combinedLayer: Layer[Nothing, Email with UserRepository] = emailLayer ++ userRepositoryLayer
       //      val program = appLogic.provideLayer(combinedLayer)
       val program = appLogic.provideSomeLayer[UserRepository](emailLayer).provideLayer(userRepositoryLayer)
-      program.fold(_ => 1, _ => 0)
+      program.fold(_ => ExitCode.failure, _ => ExitCode.success)
     }
   }
 

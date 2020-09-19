@@ -127,7 +127,7 @@ object Refactoring {
       }
     }
 
-    override def run(args: List[String]): URIO[Any, Int] = {
+    override def run(args: List[String]): URIO[Any, ExitCode] = {
       val newUser = User(UUID.randomUUID(), "hello@earth.world", 0)
       val appLogic = for {
         update <- ur.updateUser(newUser)
@@ -136,7 +136,7 @@ object Refactoring {
       val program = appLogic.provide(new UserRepository {
         override def userRepository: UserRepository.Service = new UserRepository.InMemory {}
       })
-      program.fold(_ => 1, _ => 0)
+      program.fold(_ => ExitCode.failure, _ => ExitCode.success)
     }
   }
 }

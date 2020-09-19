@@ -222,7 +222,7 @@ object MultipleLanguages {
       }
     }
 
-    override def run(args: List[String]): URIO[Any, Int] = {
+    override def run(args: List[String]): URIO[Any, ExitCode] = {
       val newUser = User(UUID.randomUUID(), "hello@earth.world", 0)
       val appLogic: ZIO[Has[UserRepository.Service] with Has[Email.Service], Throwable, Unit] = for {
         update <- ur.updateUser(newUser)
@@ -236,7 +236,7 @@ object MultipleLanguages {
 //        emailLayer.++[Nothing, Any, Has[Email.Service], Has[UserRepository.Service]](userRepositoryLayer)
         emailLayer.zipWithPar(userRepositoryLayer)(_ union _)
       val program = appLogic.provideLayer(combinedLayer)//provideSomeLayer(emailLayer).provideLayer(userRepositoryLayer)
-      program.fold(_ => 1, _ => 0)
+      program.fold(_ => ExitCode.failure, _ => ExitCode.success)
     }
   }
 
